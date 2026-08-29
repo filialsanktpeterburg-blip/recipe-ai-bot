@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 
 from gigachat import GigaChat
 from telegram import BotCommand, Update
@@ -20,6 +21,28 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+
+
+class RedactSecretsFilter(logging.Filter):
+    """Скрывает Telegram-токены, если библиотека добавила их в лог."""
+
+    token_pattern = re.compile(r"bot\d+:[A-Za-z0-9_-]{20,}")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.msg = self.token_pattern.sub("bot<СКРЫТО>", record.getMessage())
+            record.args = ()
+        except Exception:
+            pass
+        return True
+
+
+for root_handler in logging.getLogger().handlers:
+    root_handler.addFilter(RedactSecretsFilter())
+
+# httpx на уровне INFO печатает полный адрес Telegram API, содержащий токен.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 START_TEXT = (
