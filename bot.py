@@ -125,12 +125,27 @@ def generate_recipe(products: str) -> str:
     with GigaChat(
         credentials=credentials,
         scope="GIGACHAT_API_PERS",
-        model="GigaChat",
         verify_ssl_certs=False,
         timeout=60,
         max_retries=2,
     ) as client:
-        response = client.chat.create(prompt)
+        available_models = [
+            str(item.id_).strip()
+            for item in client.get_models().data
+            if getattr(item, "id_", None)
+            and str(item.id_).lower().startswith("gigachat")
+        ]
+        if not available_models:
+            raise RuntimeError("GigaChat не вернул доступную текстовую модель")
+
+        model_name = available_models[0]
+        logger.info("Используется модель GigaChat: %s", model_name)
+        response = client.chat.create(
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+        )
 
     return extract_answer(response)
 
@@ -209,9 +224,11 @@ async def post_init(application: Application) -> None:
 
 
 def main() -> None:
-    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    # BOT_TOKEN — основная переменная BotHost. Дополнительный псевдоним может
+    # обновляться с задержкой после смены токена, поэтому читаем его вторым.
+    telegram_token = os.getenv("BOT_TOKEN", "").strip()
     if not telegram_token:
-        telegram_token = get_required_env("BOT_TOKEN")
+        telegram_token = get_required_env("TELEGRAM_BOT_TOKEN")
 
     application = (
         Application.builder().token(telegram_token).post_init(post_init).build()
@@ -224,7 +241,12 @@ def main() -> None:
     )
 
     logger.info("Бот запущен")
-    application.run_polling(drop_pending_updates=True)
+    try:
+        application.run_polling(drop_pending_updates=True)
+    except Exception as exc:
+        # Не печатаем traceback: некоторые исключения Telegram содержат токен.
+        logger.error("Бот остановлен. Тип ошибки: %s", type(exc).__name__)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
